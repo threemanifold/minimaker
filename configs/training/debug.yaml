@@ -1,0 +1,18 @@
+# Fast iteration for local testing
+batch_size: 2
+gradient_accumulation_steps: 1
+max_steps: 100
+warmup_steps: 10
+lr: 3.0e-4
+min_lr: 3.0e-5
+weight_decay: 0.1
+grad_clip: 1.0
+mixed_precision: none
+
+checkpoint:
+  every: 50
+  keep: 2
+
+eval:
+  every: 20
+  steps: 5

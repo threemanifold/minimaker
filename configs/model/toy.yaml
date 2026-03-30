@@ -1,0 +1,9 @@
+# ~2M params — runs on Mac GPU / CPU for local testing
+name: toy
+n_layers: 4
+n_heads: 4
+d_model: 128
+d_ff: 512
+vocab_size: 4096
+max_seq_len: 256
+dropout: 0.1

@@ -1,0 +1,17 @@
+batch_size: 8           # per GPU
+gradient_accumulation_steps: 4
+max_steps: 100000
+warmup_steps: 2000
+lr: 3.0e-4
+min_lr: 3.0e-5
+weight_decay: 0.1
+grad_clip: 1.0
+mixed_precision: bf16   # bf16 | fp16 | none
+
+checkpoint:
+  every: 5000
+  keep: 3
+
+eval:
+  every: 1000
+  steps: 20

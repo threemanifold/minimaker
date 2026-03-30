@@ -1,0 +1,7 @@
+name: openwebtext
+type: huggingface
+path: openwebtext
+seq_len: 1024
+tokenizer: gpt2
+num_workers: 4
+cache_dir: .cache

@@ -1,0 +1,22 @@
+defaults:
+  - model: small
+  - training: default
+  - data: openwebtext
+  - _self_
+
+seed: 42
+output_dir: outputs
+compile: true  # torch.compile (auto-disabled on MPS/CPU)
+
+logging:
+  backends:
+    - tensorboard
+  log_every: 10
+  project: minimaker
+  run_name: null
+
+distributed:
+  backend: nccl
+  fsdp:
+    sharding_strategy: FULL_SHARD  # FULL_SHARD | SHARD_GRAD_OP | NO_SHARD
+    activation_checkpointing: false
