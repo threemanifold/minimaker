@@ -35,6 +35,32 @@ def get_lr(step: int, warmup: int, max_steps: int, max_lr: float, min_lr: float)
 
 
 # ---------------------------------------------------------------------------
+# GPU peak FLOPS (bf16) for MFU calculation
+# ---------------------------------------------------------------------------
+
+_GPU_PEAK_FLOPS_BF16: dict[str, float] = {
+    "H100": 990e12,
+    "H200": 990e12,
+    "A100": 312e12,
+    "L40S": 733e12,
+    "L40": 181e12,
+    "A10G": 70e12,
+    "V100": 125e12,
+}
+
+
+def get_gpu_peak_flops(device: torch.device) -> float | None:
+    """Return peak bf16 FLOPS for the GPU, or None if unknown/not CUDA."""
+    if device.type != "cuda":
+        return None
+    name = torch.cuda.get_device_name(device)
+    for gpu, flops in _GPU_PEAK_FLOPS_BF16.items():
+        if gpu in name:
+            return flops
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Eval
 # ---------------------------------------------------------------------------
 
@@ -99,7 +125,8 @@ def main(cfg: DictConfig) -> None:
     )
 
     # ---- Data ----
-    train_loader = build_dataloader(cfg, rank, world_size)
+    train_loader = build_dataloader(cfg, rank, world_size, split="train")
+    eval_loader = build_dataloader(cfg, rank, world_size, split="val")
 
     # ---- Metrics ----
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
@@ -126,8 +153,10 @@ def main(cfg: DictConfig) -> None:
     tcfg = cfg.training
     grad_accum = tcfg.gradient_accumulation_steps
     tokens_per_step = tcfg.batch_size * cfg.data.seq_len * grad_accum * world_size
+    epoch = 0
     data_iter = iter(train_loader)
     flops_per_token = model.module.flops_per_token() if is_distributed else model.flops_per_token()
+    peak_flops = get_gpu_peak_flops(device)
 
     for step in range(start_step, tcfg.max_steps):
         timer.reset()
@@ -154,6 +183,9 @@ def main(cfg: DictConfig) -> None:
                 try:
                     batch = next(data_iter)
                 except StopIteration:
+                    epoch += 1
+                    if hasattr(train_loader.sampler, "set_epoch"):
+                        train_loader.sampler.set_epoch(epoch)
                     data_iter = iter(train_loader)
                     batch = next(data_iter)
                 ids = batch["input_ids"].to(device, non_blocking=True)
@@ -198,10 +230,8 @@ def main(cfg: DictConfig) -> None:
             else 0,
         }
         # MFU — fraction of peak hardware FLOPS
-        if timer.total_ms > 0 and device.type == "cuda":
+        if timer.total_ms > 0 and peak_flops is not None:
             achieved_flops = flops_per_token * tokens_per_step / (timer.total_ms / 1000)
-            # H100 ~990 TFLOPS bf16, A100 ~312 TFLOPS bf16
-            peak_flops = 990e12 if "H100" in torch.cuda.get_device_name(device) else 312e12
             metrics["throughput/mfu"] = achieved_flops / peak_flops
 
         for phase, ms in timer.timings.items():
@@ -213,7 +243,7 @@ def main(cfg: DictConfig) -> None:
 
         # ---- Eval ----
         if tcfg.eval.every > 0 and step > 0 and step % tcfg.eval.every == 0:
-            eval_loss = evaluate(model, train_loader, device, tcfg.eval.steps, amp_ctx)
+            eval_loss = evaluate(model, eval_loader, device, tcfg.eval.steps, amp_ctx)
             tracker.log({"eval/loss": eval_loss}, step)
 
         # ---- Checkpoint ----
