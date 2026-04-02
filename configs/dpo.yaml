@@ -1,0 +1,23 @@
+defaults:
+  - model: small
+  - training: dpo
+  - data: dpo_synthetic
+  - _self_
+
+seed: 42
+output_dir: outputs/dpo
+compile: true
+pretrained_checkpoint: null  # path to SFT checkpoint.pt
+
+logging:
+  backends:
+    - tensorboard
+  log_every: 10
+  project: minimaker-dpo
+  run_name: null
+
+distributed:
+  backend: nccl
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    activation_checkpointing: false

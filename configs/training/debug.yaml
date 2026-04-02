@@ -1,7 +1,7 @@
 # Fast iteration for local testing
 batch_size: 2
 gradient_accumulation_steps: 1
-max_steps: 100
+max_steps: 1000
 warmup_steps: 10
 lr: 3.0e-4
 min_lr: 3.0e-5

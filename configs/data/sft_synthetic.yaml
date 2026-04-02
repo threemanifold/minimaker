@@ -1,0 +1,6 @@
+# Synthetic instruction/response pairs — instant startup
+name: sft_toy
+type: synthetic
+seq_len: 256
+vocab_size: 4096
+num_samples: 5000

@@ -1,0 +1,20 @@
+batch_size: 4           # per GPU
+gradient_accumulation_steps: 4
+max_steps: 5000
+warmup_steps: 100
+lr: 5.0e-6              # very low — preference learning
+min_lr: 5.0e-7
+weight_decay: 0.1
+grad_clip: 1.0
+mixed_precision: bf16
+
+dpo:
+  beta: 0.1             # temperature for DPO (controls deviation from reference)
+
+checkpoint:
+  every: 1000
+  keep: 3
+
+eval:
+  every: 500
+  steps: 10

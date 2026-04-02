@@ -1,0 +1,23 @@
+batch_size: 2           # per GPU (small — each prompt generates G completions)
+gradient_accumulation_steps: 1
+max_steps: 5000
+warmup_steps: 100
+lr: 5.0e-6              # very low — RL is sensitive
+min_lr: 5.0e-7
+weight_decay: 0.1
+grad_clip: 1.0
+mixed_precision: bf16
+
+grpo:
+  group_size: 4         # G completions per prompt
+  max_gen_len: 128      # max response tokens to generate
+  kl_coeff: 0.1         # KL penalty weight
+  temperature: 0.8      # sampling temperature
+
+checkpoint:
+  every: 1000
+  keep: 3
+
+eval:
+  every: 500
+  steps: 10

@@ -1,0 +1,6 @@
+# Synthetic prompts for GRPO testing — instant startup
+name: grpo_toy
+type: synthetic
+prompt_len: 64
+vocab_size: 4096
+num_samples: 5000

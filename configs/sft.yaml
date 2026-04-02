@@ -1,0 +1,23 @@
+defaults:
+  - model: small
+  - training: sft
+  - data: sft_synthetic
+  - _self_
+
+seed: 42
+output_dir: outputs/sft
+compile: true
+pretrained_checkpoint: null  # path to pretrained checkpoint.pt
+
+logging:
+  backends:
+    - tensorboard
+  log_every: 10
+  project: minimaker-sft
+  run_name: null
+
+distributed:
+  backend: nccl
+  fsdp:
+    sharding_strategy: FULL_SHARD
+    activation_checkpointing: false
