@@ -236,6 +236,8 @@ def main(cfg: DictConfig) -> None:
 
         for phase, ms in timer.timings.items():
             metrics[f"timing/{phase}_ms"] = ms
+            if ms > 0:
+                metrics[f"throughput/{phase}_tok_per_sec"] = tokens_per_step / (ms / 1000)
         metrics["timing/total_ms"] = timer.total_ms
 
         metrics.update(get_cuda_memory_stats(device))
