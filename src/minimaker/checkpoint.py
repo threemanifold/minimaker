@@ -99,8 +99,11 @@ def load_checkpoint(
     return latest_step
 
 
-def cleanup_checkpoints(output_dir: str, keep: int) -> None:
-    """Delete oldest checkpoints, keeping the most recent `keep`."""
+def cleanup_checkpoints(output_dir: str, keep: int, rank: int = 0) -> None:
+    """Delete oldest checkpoints, keeping the most recent `keep`. Only rank 0 deletes."""
+    if rank != 0:
+        return
+
     ckpt_root = Path(output_dir) / "checkpoints"
     if not ckpt_root.exists():
         return
@@ -110,7 +113,7 @@ def cleanup_checkpoints(output_dir: str, keep: int) -> None:
         key=lambda d: int(d.name.split("_")[1]),
     )
 
+    import shutil
+
     for old_dir in step_dirs[:-keep]:
-        for f in old_dir.iterdir():
-            f.unlink()
-        old_dir.rmdir()
+        shutil.rmtree(old_dir, ignore_errors=True)

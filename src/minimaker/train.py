@@ -251,7 +251,7 @@ def main(cfg: DictConfig) -> None:
         # ---- Checkpoint ----
         if tcfg.checkpoint.every > 0 and step > 0 and step % tcfg.checkpoint.every == 0:
             save_checkpoint(model, optimizer, step, output_dir, rank, is_distributed)
-            cleanup_checkpoints(output_dir, tcfg.checkpoint.keep)
+            cleanup_checkpoints(output_dir, tcfg.checkpoint.keep, rank)
 
     # Final checkpoint
     save_checkpoint(model, optimizer, tcfg.max_steps, output_dir, rank, is_distributed)
