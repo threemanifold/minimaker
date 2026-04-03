@@ -1,0 +1,9 @@
+# ~1.5B params (GPT-2 XL scale)
+name: xl
+n_layers: 48
+n_heads: 25
+d_model: 1600
+d_ff: 6400
+vocab_size: 50257
+max_seq_len: 1024
+dropout: 0.1

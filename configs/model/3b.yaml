@@ -1,0 +1,9 @@
+# ~3B params
+name: 3b
+n_layers: 32
+n_heads: 32
+d_model: 3200
+d_ff: 8640
+vocab_size: 50257
+max_seq_len: 1024
+dropout: 0.1
