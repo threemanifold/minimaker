@@ -53,39 +53,22 @@ def prepare_dataset(cfg: DictConfig) -> None:
         desc="Tokenizing",
     )
 
-    # Stream through tokenized data and build fixed-length chunks.
-    # Periodically flush to tensors to avoid Python-int memory overhead.
+    # Concatenate all tokens into one flat array, then reshape into chunks.
     seq_len = cfg.seq_len
     chunk_size = seq_len + 1
-    buffer: list[int] = []
-    pending: list[list[int]] = []
-    tensor_parts: list[torch.Tensor] = []
-    FLUSH_EVERY = 10_000
 
-    for example in tokenized:
-        buffer.extend(example["tokens"])
-        while len(buffer) >= chunk_size:
-            pending.append(buffer[:chunk_size])
-            buffer = buffer[chunk_size:]
-
-        if len(pending) >= FLUSH_EVERY:
-            tensor_parts.append(torch.tensor(pending, dtype=torch.long))
-            pending = []
-
-    if pending:
-        tensor_parts.append(torch.tensor(pending, dtype=torch.long))
-
-    all_data = torch.cat(tensor_parts, dim=0)
+    print("Concatenating tokens...")
+    all_tokens = np.concatenate(tokenized["tokens"])
+    n_chunks = len(all_tokens) // chunk_size
+    all_data = all_tokens[: n_chunks * chunk_size].reshape(n_chunks, chunk_size)
 
     # Hold out last 0.5% for validation
     n = len(all_data)
     val_size = max(1, int(n * 0.005))
-    train_data = all_data[:-val_size]
-    val_data = all_data[-val_size:]
 
     train_cache.parent.mkdir(parents=True, exist_ok=True)
-    np.save(train_cache, all_data[:-val_size].numpy())
-    np.save(val_cache, all_data[-val_size:].numpy())
+    np.save(train_cache, all_data[:-val_size])
+    np.save(val_cache, all_data[-val_size:])
 
     print(
         f"Cached {n - val_size:,} train and {val_size:,} val chunks "
