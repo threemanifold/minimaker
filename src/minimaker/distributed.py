@@ -22,12 +22,20 @@ def get_device() -> torch.device:
 
 def setup_distributed(cfg: DictConfig) -> tuple[int, int]:
     """Init process group. Returns (rank, world_size). No-op for single GPU / MPS."""
-    if not torch.cuda.is_available() or "RANK" not in os.environ:
+    if "RANK" not in os.environ:
         return 0, 1
 
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
     local_rank = int(os.environ["LOCAL_RANK"])
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"torchrun launched {world_size} workers but torch.cuda.is_available() "
+            "is False. This usually means your PyTorch was compiled for a newer CUDA "
+            "version than your driver supports. Check `python -c 'import torch; "
+            "print(torch.version.cuda)'` and install a matching version."
+        )
 
     dist.init_process_group(backend=cfg.distributed.backend)
     torch.cuda.set_device(local_rank)
