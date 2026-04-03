@@ -58,7 +58,10 @@ def prepare_dataset(cfg: DictConfig) -> None:
     chunk_size = seq_len + 1
 
     print("Concatenating tokens...")
-    all_tokens = np.concatenate(tokenized["tokens"])
+    # Use Arrow's zero-copy flatten — much faster than np.concatenate on ragged lists
+    all_tokens = np.array(
+        tokenized.with_format("arrow")["tokens"].combine_chunks().values, copy=False
+    )
     n_chunks = len(all_tokens) // chunk_size
     all_data = all_tokens[: n_chunks * chunk_size].reshape(n_chunks, chunk_size)
 
