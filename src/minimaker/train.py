@@ -248,8 +248,9 @@ def main(cfg: DictConfig) -> None:
             save_checkpoint(model, optimizer, step, output_dir, rank, is_distributed)
             cleanup_checkpoints(output_dir, tcfg.checkpoint.keep, rank)
 
-    # Final checkpoint
-    save_checkpoint(model, optimizer, tcfg.max_steps, output_dir, rank, is_distributed)
+    # Final checkpoint (skip if checkpointing is disabled)
+    if tcfg.checkpoint.every > 0:
+        save_checkpoint(model, optimizer, tcfg.max_steps, output_dir, rank, is_distributed)
     tracker.finish()
     cleanup_distributed()
 
