@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.distributed as dist
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
@@ -15,9 +16,9 @@ from omegaconf import DictConfig
 # ---------------------------------------------------------------------------
 
 def _cache_paths(cfg: DictConfig) -> tuple[Path, Path]:
-    """Return (train_cache, val_cache) paths for a dataset config."""
+    """Return (train_cache, val_cache) .npy paths for a dataset config."""
     cache_dir = Path(cfg.cache_dir)
-    return cache_dir / f"{cfg.name}_train.pt", cache_dir / f"{cfg.name}_val.pt"
+    return cache_dir / f"{cfg.name}_train.npy", cache_dir / f"{cfg.name}_val.npy"
 
 
 # ---------------------------------------------------------------------------
@@ -83,11 +84,11 @@ def prepare_dataset(cfg: DictConfig) -> None:
     val_data = all_data[-val_size:]
 
     train_cache.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(train_data, train_cache)
-    torch.save(val_data, val_cache)
+    np.save(train_cache, all_data[:-val_size].numpy())
+    np.save(val_cache, all_data[-val_size:].numpy())
 
     print(
-        f"Cached {len(train_data):,} train and {len(val_data):,} val chunks "
+        f"Cached {n - val_size:,} train and {val_size:,} val chunks "
         f"(seq_len={seq_len}) to {train_cache.parent}"
     )
 
@@ -112,7 +113,12 @@ class SyntheticDataset(Dataset):
 
 
 class HuggingFaceDataset(Dataset):
-    """Loads pre-tokenized chunks from cache. Run ``prepare_dataset`` first."""
+    """Memory-mapped pre-tokenized chunks. Run ``prepare_dataset`` first.
+
+    Data is read lazily from disk via numpy mmap — only the accessed chunks
+    are paged into RAM by the OS, so memory usage stays low regardless of
+    dataset size.
+    """
 
     def __init__(
         self, cfg: DictConfig, split: str = "train", rank: int = 0, world_size: int = 1
@@ -128,13 +134,13 @@ class HuggingFaceDataset(Dataset):
                 f"  python -m minimaker.data data={cfg.name}"
             )
 
-        self.data = torch.load(cache_path, weights_only=True)
+        self.data = np.load(cache_path, mmap_mode="r")
 
     def __len__(self) -> int:
         return len(self.data)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        tokens = self.data[idx]
+        tokens = torch.from_numpy(self.data[idx].copy()).long()
         return {"input_ids": tokens[:-1], "labels": tokens[1:]}
 
 
