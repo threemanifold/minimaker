@@ -1,0 +1,9 @@
+# ~7B params (adjusted for 2-matrix MLP)
+name: 7b_full
+n_layers: 32
+n_heads: 32
+d_model: 4096
+d_ff: 16384
+vocab_size: 50257
+max_seq_len: 1024
+dropout: 0.1
