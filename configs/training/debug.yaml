@@ -10,7 +10,7 @@ grad_clip: 1.0
 mixed_precision: none
 
 checkpoint:
-  every: 50
+  every: 0
   keep: 2
 
 eval:
