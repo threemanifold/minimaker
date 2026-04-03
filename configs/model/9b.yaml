@@ -1,0 +1,9 @@
+# ~9B params
+name: 9b
+n_layers: 36
+n_heads: 36
+d_model: 4608
+d_ff: 18432
+vocab_size: 50257
+max_seq_len: 1024
+dropout: 0.1
