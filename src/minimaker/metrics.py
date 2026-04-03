@@ -66,11 +66,14 @@ class StepTimer:
 def get_cuda_memory_stats(device: torch.device) -> dict[str, float]:
     if device.type != "cuda":
         return {}
+    free, total = torch.cuda.mem_get_info(device)
     return {
         "memory/allocated_gb": torch.cuda.memory_allocated(device) / 1e9,
         "memory/reserved_gb": torch.cuda.memory_reserved(device) / 1e9,
         "memory/peak_allocated_gb": torch.cuda.max_memory_allocated(device) / 1e9,
         "memory/peak_reserved_gb": torch.cuda.max_memory_reserved(device) / 1e9,
+        "memory/available_gb": free / 1e9,
+        "memory/total_gb": total / 1e9,
     }
 
 
