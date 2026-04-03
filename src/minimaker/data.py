@@ -65,7 +65,7 @@ def prepare_dataset(cfg: DictConfig) -> None:
         flat = np.array(
             shard.with_format("arrow")["tokens"].combine_chunks().values, copy=False
         )
-        parts.append(flat)
+        parts.append(flat.astype(np.uint16))
 
     all_tokens = np.concatenate(parts)
 
