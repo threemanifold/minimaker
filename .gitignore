@@ -6,6 +6,7 @@ dist/
 outputs/
 *.pt
 *.ckpt
+.env
 wandb/
 .venv/
 .uv/

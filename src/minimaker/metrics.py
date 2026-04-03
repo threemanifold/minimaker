@@ -112,7 +112,14 @@ class TensorBoardBackend:
 
 class WandbBackend:
     def __init__(self, cfg: DictConfig):
+        import os
         import wandb
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        api_key = os.environ.get("WANDB_API_KEY")
+        if api_key:
+            wandb.login(key=api_key)
 
         wandb.init(
             project=cfg.logging.project,

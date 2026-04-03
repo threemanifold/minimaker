@@ -11,8 +11,9 @@ compile: true  # torch.compile (auto-disabled on MPS/CPU)
 logging:
   backends:
     - tensorboard
+    - wandb
   log_every: 10
-  project: minimaker
+  project: distributed-training-experiments
   run_name: null
 
 distributed:

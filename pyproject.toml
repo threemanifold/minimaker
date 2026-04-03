@@ -12,6 +12,7 @@ dependencies = [
     "datasets>=2.16",
     "transformers>=4.37",
     "rich>=13.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
