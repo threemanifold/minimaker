@@ -127,6 +127,8 @@ class WandbBackend:
         wandb.init(
             project=cfg.logging.project,
             name=cfg.logging.get("run_name"),
+            group=cfg.logging.get("group"),
+            tags=cfg.logging.get("tags", []),
             config=dict(cfg),
         )
 
