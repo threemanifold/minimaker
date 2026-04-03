@@ -22,11 +22,11 @@ def _cache_paths(cfg: DictConfig) -> tuple[Path, Path]:
 
 
 # ---------------------------------------------------------------------------
-# Prepare (download + tokenize + chunk + cache)
+# Prepare (download + tokenize + save flat token file)
 # ---------------------------------------------------------------------------
 
 def prepare_dataset(cfg: DictConfig) -> None:
-    """Download, tokenize, chunk, and cache a HuggingFace dataset.
+    """Download, tokenize, and save a flat token array to disk.
 
     Safe to call repeatedly — skips if cache already exists.
     Run this *before* training: ``python -m minimaker.data data=openwebtext``
@@ -53,29 +53,34 @@ def prepare_dataset(cfg: DictConfig) -> None:
         desc="Tokenizing",
     )
 
-    # Concatenate all tokens into one flat array, then reshape into chunks.
-    seq_len = cfg.seq_len
-    chunk_size = seq_len + 1
+    # Flatten all tokens into one contiguous array.
+    # Process in shards to avoid Arrow 32-bit offset overflow (>2B elements).
+    print("Flattening tokens...")
+    SHARD_SIZE = 500_000
+    parts: list[np.ndarray] = []
 
-    print("Concatenating tokens...")
-    # Use Arrow's zero-copy flatten — much faster than np.concatenate on ragged lists
-    all_tokens = np.array(
-        tokenized.with_format("arrow")["tokens"].combine_chunks().values, copy=False
-    )
-    n_chunks = len(all_tokens) // chunk_size
-    all_data = all_tokens[: n_chunks * chunk_size].reshape(n_chunks, chunk_size)
+    for start in range(0, len(tokenized), SHARD_SIZE):
+        end = min(start + SHARD_SIZE, len(tokenized))
+        shard = tokenized.select(range(start, end))
+        flat = np.array(
+            shard.with_format("arrow")["tokens"].combine_chunks().values, copy=False
+        )
+        parts.append(flat)
 
-    # Hold out last 0.5% for validation
-    n = len(all_data)
-    val_size = max(1, int(n * 0.005))
+    all_tokens = np.concatenate(parts)
+
+    # Hold out last 0.5% of tokens for validation
+    val_size = max(1025, int(len(all_tokens) * 0.005))
+    train_tokens = all_tokens[:-val_size]
+    val_tokens = all_tokens[-val_size:]
 
     train_cache.parent.mkdir(parents=True, exist_ok=True)
-    np.save(train_cache, all_data[:-val_size])
-    np.save(val_cache, all_data[-val_size:])
+    np.save(train_cache, train_tokens)
+    np.save(val_cache, val_tokens)
 
     print(
-        f"Cached {n - val_size:,} train and {val_size:,} val chunks "
-        f"(seq_len={seq_len}) to {train_cache.parent}"
+        f"Cached {len(train_tokens):,} train and {len(val_tokens):,} val tokens "
+        f"to {train_cache.parent}"
     )
 
 
@@ -99,11 +104,11 @@ class SyntheticDataset(Dataset):
 
 
 class HuggingFaceDataset(Dataset):
-    """Memory-mapped pre-tokenized chunks. Run ``prepare_dataset`` first.
+    """Memory-mapped flat token file, sliced into chunks on the fly.
 
-    Data is read lazily from disk via numpy mmap — only the accessed chunks
-    are paged into RAM by the OS, so memory usage stays low regardless of
-    dataset size.
+    The .npy file is one flat 1-D array of token IDs. Each index maps to a
+    contiguous window of ``seq_len + 1`` tokens. Data is read lazily via
+    numpy mmap — only accessed pages are loaded into RAM.
     """
 
     def __init__(
@@ -121,12 +126,14 @@ class HuggingFaceDataset(Dataset):
             )
 
         self.data = np.load(cache_path, mmap_mode="r")
+        self.n_chunks = len(self.data) // (self.seq_len + 1)
 
     def __len__(self) -> int:
-        return len(self.data)
+        return self.n_chunks
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        tokens = torch.from_numpy(self.data[idx].copy()).long()
+        start = idx * (self.seq_len + 1)
+        tokens = torch.from_numpy(self.data[start : start + self.seq_len + 1].copy()).long()
         return {"input_ids": tokens[:-1], "labels": tokens[1:]}
 
 
