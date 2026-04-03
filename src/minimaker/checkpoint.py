@@ -1,4 +1,4 @@
-"""Checkpoint save / load / cleanup — supports both single-GPU and FSDP."""
+"""Checkpoint save / load / cleanup — supports both single-GPU and FSDP2."""
 
 from __future__ import annotations
 
@@ -19,17 +19,15 @@ def save_checkpoint(
     ckpt_dir = Path(output_dir) / "checkpoints" / f"step_{step}"
 
     if is_distributed:
-        from torch.distributed.fsdp import (
-            FullyShardedDataParallel as FSDP,
-            StateDictType,
-            FullStateDictConfig,
+        from torch.distributed.checkpoint.state_dict import (
+            get_model_state_dict,
+            get_optimizer_state_dict,
+            StateDictOptions,
         )
 
-        # Gather full state dicts to rank 0
-        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
-            model_state = model.state_dict()
-        optim_state = FSDP.full_optim_state_dict(model, optimizer)
+        options = StateDictOptions(full_state_dict=True, cpu_offload=True)
+        model_state = get_model_state_dict(model, options=options)
+        optim_state = get_optimizer_state_dict(model, optimizer, options=options)
 
         if rank == 0:
             ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -78,18 +76,17 @@ def load_checkpoint(
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
     if is_distributed:
-        from torch.distributed.fsdp import (
-            FullyShardedDataParallel as FSDP,
-            StateDictType,
+        from torch.distributed.checkpoint.state_dict import (
+            set_model_state_dict,
+            set_optimizer_state_dict,
+            StateDictOptions,
         )
 
-        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-            model.load_state_dict(checkpoint["model"])
-
-        sharded_osd = FSDP.shard_full_optim_state_dict(
-            checkpoint["optimizer"], model
+        options = StateDictOptions(full_state_dict=True)
+        set_model_state_dict(model, checkpoint["model"], options=options)
+        set_optimizer_state_dict(
+            model, optimizer, optim_state_dict=checkpoint["optimizer"], options=options
         )
-        optimizer.load_state_dict(sharded_osd)
     else:
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])

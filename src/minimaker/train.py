@@ -15,7 +15,7 @@ from minimaker.distributed import (
     get_device,
     setup_distributed,
     cleanup_distributed,
-    wrap_with_fsdp,
+    apply_fsdp2,
 )
 from minimaker.metrics import StepTimer, MetricsTracker, get_cuda_memory_stats
 from minimaker.checkpoint import save_checkpoint, load_checkpoint, cleanup_checkpoints
@@ -108,11 +108,14 @@ def main(cfg: DictConfig) -> None:
     if not is_distributed and cfg.distributed.fsdp.activation_checkpointing:
         model.enable_activation_checkpointing()
 
-    # FSDP wrapping
+    # FSDP2 sharding (modifies model in-place)
     if is_distributed:
-        model = wrap_with_fsdp(model, cfg, device)
+        apply_fsdp2(model, cfg)
 
-    # torch.compile (CUDA only)
+    # Keep a reference to the unwrapped model (before compile wraps it)
+    raw_model = model
+
+    # torch.compile (CUDA only — works with FSDP2)
     if cfg.compile and device.type == "cuda":
         model = torch.compile(model)
 
@@ -155,7 +158,7 @@ def main(cfg: DictConfig) -> None:
     tokens_per_step = tcfg.batch_size * cfg.data.seq_len * grad_accum * world_size
     epoch = 0
     data_iter = iter(train_loader)
-    flops_per_token = model.module.flops_per_token() if is_distributed else model.flops_per_token()
+    flops_per_token = raw_model.flops_per_token()
     peak_flops = get_gpu_peak_flops(device)
 
     for step in range(start_step, tcfg.max_steps):
@@ -171,13 +174,9 @@ def main(cfg: DictConfig) -> None:
         accum_loss = 0.0
 
         for micro in range(grad_accum):
-            # Skip gradient sync on intermediate micro-steps
-            no_sync = (
-                is_distributed
-                and micro < grad_accum - 1
-                and hasattr(model, "no_sync")
-            )
-            sync_ctx = model.no_sync() if no_sync else nullcontext()
+            # FSDP2: skip gradient sync on intermediate micro-steps
+            if is_distributed:
+                raw_model.set_requires_gradient_sync(micro == grad_accum - 1)
 
             with timer.track("data_load"):
                 try:
@@ -191,17 +190,16 @@ def main(cfg: DictConfig) -> None:
                 ids = batch["input_ids"].to(device, non_blocking=True)
                 labels = batch["labels"].to(device, non_blocking=True)
 
-            with sync_ctx:
-                with timer.track("forward"):
-                    with amp_ctx:
-                        _, loss = model(ids, labels)
-                        loss = loss / grad_accum
+            with timer.track("forward"):
+                with amp_ctx:
+                    _, loss = model(ids, labels)
+                    loss = loss / grad_accum
 
-                with timer.track("backward"):
-                    if scaler:
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
+            with timer.track("backward"):
+                if scaler:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
 
             accum_loss += loss.item()
 
@@ -209,10 +207,7 @@ def main(cfg: DictConfig) -> None:
             if tcfg.grad_clip > 0:
                 if scaler:
                     scaler.unscale_(optimizer)
-                if is_distributed:
-                    model.clip_grad_norm_(tcfg.grad_clip)
-                else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.grad_clip)
 
             if scaler:
                 scaler.step(optimizer)

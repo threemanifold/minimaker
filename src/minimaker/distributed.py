@@ -1,8 +1,7 @@
-"""Distributed training setup — FSDP wrapping, device detection, process group."""
+"""Distributed training setup — FSDP2 sharding, device detection, process group."""
 
 from __future__ import annotations
 
-import functools
 import os
 
 import torch
@@ -48,76 +47,44 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 
-def wrap_with_fsdp(
+def apply_fsdp2(
     model: torch.nn.Module,
     cfg: DictConfig,
-    device: torch.device,
-) -> torch.nn.Module:
-    """Wrap model with FSDP + optional mixed precision and activation checkpointing."""
-    from torch.distributed.fsdp import (
-        FullyShardedDataParallel as FSDP,
-        MixedPrecision,
-        ShardingStrategy,
-    )
-    from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+) -> None:
+    """Apply FSDP2 sharding in-place: shard each TransformerBlock, then the root."""
+    from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
     from minimaker.model import TransformerBlock
 
     # --- Mixed precision policy ---
     mp_cfg = cfg.training.mixed_precision
     mp_policy = None
     if mp_cfg == "bf16":
-        mp_policy = MixedPrecision(
+        mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16,
             reduce_dtype=torch.bfloat16,
-            buffer_dtype=torch.bfloat16,
         )
     elif mp_cfg == "fp16":
-        mp_policy = MixedPrecision(
+        mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
-            buffer_dtype=torch.float16,
         )
 
-    # --- Wrap policy: one FSDP unit per TransformerBlock ---
-    wrap_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={TransformerBlock},
-    )
-
     # --- Sharding strategy ---
-    strategy_map = {
-        "FULL_SHARD": ShardingStrategy.FULL_SHARD,
-        "SHARD_GRAD_OP": ShardingStrategy.SHARD_GRAD_OP,
-        "NO_SHARD": ShardingStrategy.NO_SHARD,
-    }
-    strategy = strategy_map.get(
-        cfg.distributed.fsdp.sharding_strategy, ShardingStrategy.FULL_SHARD
-    )
+    # FSDP2: reshard_after_forward=True  → FULL_SHARD (default)
+    #         reshard_after_forward=False → SHARD_GRAD_OP
+    strategy = cfg.distributed.fsdp.sharding_strategy
+    reshard_after_forward = strategy != "SHARD_GRAD_OP"
 
-    model = FSDP(
-        model,
-        sharding_strategy=strategy,
-        mixed_precision=mp_policy,
-        auto_wrap_policy=wrap_policy,
-        device_id=device,
-        use_orig_params=True,  # required for torch.compile compatibility
-    )
+    fsdp_kwargs: dict = {"reshard_after_forward": reshard_after_forward}
+    if mp_policy is not None:
+        fsdp_kwargs["mp_policy"] = mp_policy
+
+    # --- Shard each transformer block, then the root model ---
+    for module in model.modules():
+        if isinstance(module, TransformerBlock):
+            fully_shard(module, **fsdp_kwargs)
+    fully_shard(model, **fsdp_kwargs)
 
     # --- Activation checkpointing ---
     if cfg.distributed.fsdp.activation_checkpointing:
-        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-            apply_activation_checkpointing,
-            checkpoint_wrapper,
-            CheckpointImpl,
-        )
-
-        apply_activation_checkpointing(
-            model,
-            checkpoint_wrapper_fn=functools.partial(
-                checkpoint_wrapper,
-                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-            ),
-            check_fn=lambda m: isinstance(m, TransformerBlock),
-        )
-
-    return model
+        model.enable_activation_checkpointing()
