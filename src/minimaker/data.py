@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -21,12 +22,50 @@ def _cache_paths(cfg: DictConfig) -> tuple[Path, Path]:
     return cache_dir / f"{cfg.name}_train.npy", cache_dir / f"{cfg.name}_val.npy"
 
 
+def _gcs_paths(cfg: DictConfig) -> tuple[str, str] | None:
+    """Return (train_gcs, val_gcs) URIs, or None if GCS is not configured."""
+    bucket = getattr(cfg, "gcs_bucket", None)
+    if not bucket:
+        return None
+    bucket = bucket.rstrip("/")
+    return f"{bucket}/{cfg.name}_train.npy", f"{bucket}/{cfg.name}_val.npy"
+
+
+# ---------------------------------------------------------------------------
+# GCS helpers (uses gcloud CLI — pre-installed on GCP VMs)
+# ---------------------------------------------------------------------------
+
+def _gcs_exists(gcs_path: str) -> bool:
+    result = subprocess.run(
+        ["gcloud", "storage", "ls", gcs_path],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _gcs_upload(local_path: Path, gcs_path: str) -> None:
+    print(f"Uploading {local_path.name} → {gcs_path}")
+    subprocess.run(
+        ["gcloud", "storage", "cp", str(local_path), gcs_path],
+        check=True,
+    )
+
+
+def _gcs_download(gcs_path: str, local_path: Path) -> None:
+    print(f"Downloading {gcs_path} → {local_path}")
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["gcloud", "storage", "cp", gcs_path, str(local_path)],
+        check=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Prepare (download + tokenize + save flat token file)
 # ---------------------------------------------------------------------------
 
 def prepare_dataset(cfg: DictConfig) -> None:
-    """Download, tokenize, and save a flat token array to disk.
+    """Download, tokenize, and save a flat token array to disk + optional GCS.
 
     Safe to call repeatedly — skips if cache already exists.
     Run this *before* training: ``python -m minimaker.data data=openwebtext``
@@ -35,9 +74,18 @@ def prepare_dataset(cfg: DictConfig) -> None:
     from transformers import AutoTokenizer
 
     train_cache, val_cache = _cache_paths(cfg)
+    gcs = _gcs_paths(cfg)
 
+    # Check if already done (local or GCS)
     if train_cache.exists() and val_cache.exists():
         print(f"Cache already exists at {train_cache.parent}, skipping.")
+        if gcs and not _gcs_exists(gcs[0]):
+            _gcs_upload(train_cache, gcs[0])
+            _gcs_upload(val_cache, gcs[1])
+        return
+
+    if gcs and _gcs_exists(gcs[0]) and _gcs_exists(gcs[1]):
+        print("Cache found in GCS, skipping tokenization.")
         return
 
     print(f"Downloading {cfg.name} dataset...")
@@ -83,6 +131,11 @@ def prepare_dataset(cfg: DictConfig) -> None:
         f"to {train_cache.parent}"
     )
 
+    # Upload to GCS if configured
+    if gcs:
+        _gcs_upload(train_cache, gcs[0])
+        _gcs_upload(val_cache, gcs[1])
+
 
 # ---------------------------------------------------------------------------
 # Datasets
@@ -109,6 +162,8 @@ class HuggingFaceDataset(Dataset):
     The .npy file is one flat 1-D array of token IDs. Each index maps to a
     contiguous window of ``seq_len + 1`` tokens. Data is read lazily via
     numpy mmap — only accessed pages are loaded into RAM.
+
+    If ``gcs_bucket`` is set and local cache is missing, downloads from GCS first.
     """
 
     def __init__(
@@ -117,6 +172,17 @@ class HuggingFaceDataset(Dataset):
         self.seq_len = cfg.seq_len
         train_cache, val_cache = _cache_paths(cfg)
         cache_path = train_cache if split == "train" else val_cache
+
+        # Pull from GCS if local cache is missing
+        if not cache_path.exists():
+            gcs = _gcs_paths(cfg)
+            if gcs:
+                gcs_path = gcs[0] if split == "train" else gcs[1]
+                # In distributed: only rank 0 downloads, others wait
+                if rank == 0:
+                    _gcs_download(gcs_path, cache_path)
+                if world_size > 1:
+                    dist.barrier()
 
         if not cache_path.exists():
             raise FileNotFoundError(

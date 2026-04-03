@@ -5,3 +5,5 @@ seq_len: 1024
 tokenizer: gpt2
 num_workers: 4
 cache_dir: ${oc.env:HOME}/.cache/minimaker
+# GCS bucket for storing/loading tokenized data (optional, null to disable)
+gcs_bucket: null  # e.g. gs://your-bucket/data
